@@ -1,0 +1,677 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Long Chat Turbo Runner</title>
+  <style>
+    :root {
+      --bg-a: #08111f;
+      --bg-b: #1a2438;
+      --panel: rgba(12, 20, 36, 0.76);
+      --panel-border: rgba(113, 171, 255, 0.28);
+      --text-main: #ecf4ff;
+      --text-soft: #b4c6dd;
+      --accent: #73ffc2;
+      --accent-2: #6fb8ff;
+      --danger: #ff8f8f;
+      --radius: 16px;
+      --mono: "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--mono);
+      color: var(--text-main);
+      background:
+        radial-gradient(1300px 700px at 10% -20%, #234364 0%, transparent 60%),
+        radial-gradient(1000px 700px at 95% 5%, #1a3f4f 0%, transparent 55%),
+        linear-gradient(135deg, var(--bg-a), var(--bg-b));
+    }
+
+    .shell {
+      width: min(1180px, 100% - 32px);
+      margin: 24px auto;
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 16px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: var(--radius);
+      backdrop-filter: blur(6px);
+      box-shadow: 0 16px 50px rgba(0, 0, 0, 0.28);
+    }
+
+    .controls {
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+      align-content: start;
+      max-height: calc(100vh - 48px);
+      overflow-y: auto;
+    }
+
+    .heading {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .sub {
+      margin: 0;
+      color: var(--text-soft);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .group {
+      border: 1px solid rgba(117, 151, 190, 0.36);
+      border-radius: 12px;
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .group-title {
+      margin: 0;
+      color: var(--accent);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    label {
+      font-size: 12px;
+      color: var(--text-soft);
+    }
+
+    input,
+    select,
+    button {
+      font-family: inherit;
+      font-size: 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(133, 164, 200, 0.34);
+      color: var(--text-main);
+      background: rgba(5, 10, 20, 0.45);
+      padding: 8px 10px;
+    }
+
+    input,
+    select {
+      min-width: 96px;
+      flex: 1;
+    }
+
+    button {
+      cursor: pointer;
+      background: linear-gradient(135deg, rgba(19, 49, 79, 0.92), rgba(24, 65, 54, 0.92));
+      border-color: rgba(114, 203, 255, 0.45);
+      min-width: 104px;
+    }
+
+    button:hover {
+      border-color: rgba(115, 255, 194, 0.8);
+    }
+
+    button.secondary {
+      background: rgba(11, 19, 33, 0.78);
+    }
+
+    button.warn {
+      border-color: rgba(255, 143, 143, 0.6);
+      background: rgba(57, 13, 22, 0.72);
+    }
+
+    .workspace {
+      display: grid;
+      gap: 12px;
+      padding: 14px;
+      max-height: calc(100vh - 48px);
+      overflow: hidden;
+    }
+
+    .status {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      min-height: 164px;
+    }
+
+    .mono-box {
+      margin: 0;
+      border-radius: 12px;
+      border: 1px solid rgba(117, 151, 190, 0.36);
+      background: rgba(4, 9, 18, 0.65);
+      padding: 10px;
+      overflow: auto;
+      font-size: 12px;
+      line-height: 1.35;
+      white-space: pre-wrap;
+      color: #d7f4ff;
+    }
+
+    .thread-wrap {
+      border-radius: 12px;
+      border: 1px solid rgba(117, 151, 190, 0.36);
+      background: rgba(3, 7, 13, 0.72);
+      padding: 14px;
+      overflow: auto;
+      min-height: 360px;
+      position: relative;
+    }
+
+    #thread {
+      display: grid;
+      gap: 10px;
+    }
+
+    .turn {
+      border-radius: 10px;
+      border: 1px solid rgba(110, 150, 198, 0.35);
+      background: rgba(7, 16, 29, 0.84);
+      padding: 10px;
+    }
+
+    .turn header {
+      color: #8ad8ff;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 4px;
+    }
+
+    .placeholder {
+      border: 1px dashed rgba(115, 255, 194, 0.45);
+      border-radius: 9px;
+      color: #9debc9;
+      background: rgba(9, 38, 29, 0.45);
+      font-size: 12px;
+      padding: 8px 10px;
+    }
+
+    .badge {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      font-size: 12px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(133, 164, 200, 0.35);
+      background: rgba(1, 6, 12, 0.84);
+      color: var(--text-main);
+      pointer-events: none;
+      z-index: 999;
+    }
+
+    .theme-desc {
+      margin: 0;
+      color: var(--text-soft);
+      font-size: 11px;
+    }
+
+    @media (max-width: 980px) {
+      .shell {
+        grid-template-columns: 1fr;
+      }
+
+      .controls,
+      .workspace {
+        max-height: none;
+      }
+
+      .status {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <aside class="panel controls">
+      <h1 class="heading">Long Chat Turbo Runner</h1>
+      <p class="sub">Standalone playground for trim behavior and ASCII animation themes (including the banner.txt cyberpunk header). Open browser devtools console for styled output.</p>
+
+      <section class="group">
+        <h2 class="group-title">Trim Controls</h2>
+        <div class="row">
+          <label for="keep-last-input">Keep last turns</label>
+          <input id="keep-last-input" type="number" min="1" value="12" />
+          <button id="btn-keep">Set</button>
+        </div>
+        <div class="row">
+          <button id="btn-trim">trimChatNow()</button>
+          <button id="btn-start">trimChatStart()</button>
+          <button id="btn-stop" class="warn">trimChatStop()</button>
+        </div>
+        <div class="row">
+          <button id="btn-status" class="secondary">trimChatStatus()</button>
+        </div>
+      </section>
+
+      <section class="group">
+        <h2 class="group-title">Thread Simulation</h2>
+        <div class="row">
+          <button id="btn-add-one">Add turn</button>
+          <button id="btn-add-five">Add +5 turns</button>
+          <button id="btn-reset" class="secondary">Reset thread</button>
+        </div>
+        <div class="row">
+          <label for="seed-count-input">Seed turns</label>
+          <input id="seed-count-input" type="number" min="1" value="30" />
+        </div>
+      </section>
+
+      <section class="group">
+        <h2 class="group-title">Animation Theme</h2>
+        <div class="row">
+          <label for="theme-select">Theme</label>
+          <select id="theme-select"></select>
+        </div>
+        <p id="theme-desc" class="theme-desc"></p>
+        <div class="row">
+          <button id="btn-play-theme">Play selected</button>
+          <button id="btn-play-random" class="secondary">Play random</button>
+        </div>
+        <div class="row">
+          <label for="play-on-trim-checkbox">Play on trim</label>
+          <input id="play-on-trim-checkbox" type="checkbox" checked />
+        </div>
+      </section>
+
+      <section class="group">
+        <h2 class="group-title">Global API</h2>
+        <p class="sub">Available on <code>window</code>: <code>trimChatNow</code>, <code>trimChatSetKeepLast</code>, <code>trimChatStatus</code>, <code>trimChatStop</code>, <code>trimChatStart</code>.</p>
+      </section>
+    </aside>
+
+    <section class="panel workspace">
+      <div class="status">
+        <pre id="status-view" class="mono-box"></pre>
+        <pre id="console-view" class="mono-box"></pre>
+      </div>
+      <div class="thread-wrap">
+        <div id="thread"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="runner-badge" class="badge">runner booting</div>
+
+  <script src="./lib/ascii-animation-options.js"></script>
+  <script>
+    (() => {
+      'use strict';
+
+      const CONFIG = {
+        keepLast: 12,
+        trimDebounceMs: 220,
+        preservePinnedUI: true,
+        playAnimationOnTrim: true,
+        animationThemeId: 'cyberpunk-terminal'
+      };
+
+      let observer = null;
+      let trimTimer = null;
+      let lastTrimmedCount = 0;
+      let nextTurnId = 1;
+      let frameTimer = null;
+
+      const $ = (id) => document.getElementById(id);
+      const els = {
+        thread: $('thread'),
+        badge: $('runner-badge'),
+        statusView: $('status-view'),
+        consoleView: $('console-view'),
+        keepLastInput: $('keep-last-input'),
+        seedCountInput: $('seed-count-input'),
+        themeSelect: $('theme-select'),
+        themeDesc: $('theme-desc'),
+        playOnTrimCheckbox: $('play-on-trim-checkbox'),
+        btnKeep: $('btn-keep'),
+        btnTrim: $('btn-trim'),
+        btnStart: $('btn-start'),
+        btnStop: $('btn-stop'),
+        btnStatus: $('btn-status'),
+        btnAddOne: $('btn-add-one'),
+        btnAddFive: $('btn-add-five'),
+        btnReset: $('btn-reset'),
+        btnPlayTheme: $('btn-play-theme'),
+        btnPlayRandom: $('btn-play-random')
+      };
+
+      function now() {
+        const d = new Date();
+        return d.toTimeString().slice(0, 8);
+      }
+
+      function logLine(message) {
+        const line = `[${now()}] ${message}`;
+        els.consoleView.textContent += `${line}\n`;
+        els.consoleView.scrollTop = els.consoleView.scrollHeight;
+      }
+
+      function setBadge(text) {
+        els.badge.textContent = text;
+      }
+
+      function writeStatus(extra) {
+        const payload = {
+          keepLast: CONFIG.keepLast,
+          observerActive: !!observer,
+          totalTrimmedThisPage: lastTrimmedCount,
+          visibleTurns: getTurnArticles().length,
+          selectedTheme: CONFIG.animationThemeId,
+          playAnimationOnTrim: CONFIG.playAnimationOnTrim,
+          ...extra
+        };
+        els.statusView.textContent = JSON.stringify(payload, null, 2);
+      }
+
+      function appendTurn(content) {
+        const article = document.createElement('article');
+        article.className = 'turn';
+        article.dataset.testid = `conversation-turn-${nextTurnId}`;
+
+        const header = document.createElement('header');
+        header.textContent = `conversation-turn-${nextTurnId}`;
+
+        const body = document.createElement('div');
+        body.textContent = content || `Synthetic turn ${nextTurnId}. Lorem ipsum trim probe.`;
+
+        article.appendChild(header);
+        article.appendChild(body);
+        els.thread.appendChild(article);
+        nextTurnId += 1;
+      }
+
+      function seedTurns(count) {
+        els.thread.innerHTML = '';
+        nextTurnId = 1;
+        for (let i = 0; i < count; i += 1) {
+          appendTurn(`Synthetic turn ${i + 1}. Diagnostic stream packet #${1000 + i}.`);
+        }
+      }
+
+      function getTurnArticles() {
+        let nodes = [...els.thread.querySelectorAll('article[data-testid^="conversation-turn-"]')];
+        if (CONFIG.preservePinnedUI) {
+          nodes = nodes.filter((el) => !el.dataset.cgptTrimPlaceholder);
+        }
+        return nodes;
+      }
+
+      function makePlaceholder(removedCount) {
+        const el = document.createElement('div');
+        el.className = 'placeholder';
+        el.dataset.cgptTrimPlaceholder = '1';
+        el.textContent = `[${removedCount} older turn${removedCount === 1 ? '' : 's'} trimmed locally]`;
+        return el;
+      }
+
+      function stopAnimationPlayback() {
+        if (frameTimer) {
+          clearInterval(frameTimer);
+          frameTimer = null;
+        }
+      }
+
+      function playTheme(themeId) {
+        if (!window.TrimAsciiThemes) {
+          logLine('Theme library missing: window.TrimAsciiThemes not found.');
+          return;
+        }
+
+        const theme = window.TrimAsciiThemes.pickTheme(themeId);
+        stopAnimationPlayback();
+
+        console.log(`%c${theme.introBanner.join('\n')}`, theme.styles.intro);
+        logLine(`[theme:${theme.id}] START`);
+
+        let frameIndex = 0;
+        frameTimer = setInterval(() => {
+          if (frameIndex >= theme.frames.length) {
+            clearInterval(frameTimer);
+            frameTimer = null;
+            console.log(`%c${theme.completionBanner.join('\n')}`, theme.styles.completion);
+            logLine(`[theme:${theme.id}] COMPLETE`);
+            return;
+          }
+
+          const frame = theme.frames[frameIndex];
+          console.log(`%c${frame}`, theme.styles.frame);
+          logLine(frame);
+          frameIndex += 1;
+        }, theme.frameDelayMs);
+      }
+
+      function trimNow() {
+        const articles = getTurnArticles();
+        const excess = articles.length - CONFIG.keepLast;
+
+        if (excess <= 0) {
+          setBadge(`trim idle (${articles.length})`);
+          writeStatus({ lastTrimmed: 0 });
+          return 0;
+        }
+
+        const toRemove = articles.slice(0, excess);
+        [...els.thread.querySelectorAll('[data-cgpt-trim-placeholder="1"]')].forEach((n) => n.remove());
+
+        const anchor = toRemove[0];
+        const anchorParent = anchor ? anchor.parentNode : null;
+        toRemove.forEach((n) => n.remove());
+
+        const placeholder = makePlaceholder(toRemove.length);
+        if (anchorParent) {
+          anchorParent.prepend(placeholder);
+        } else {
+          els.thread.prepend(placeholder);
+        }
+
+        lastTrimmedCount += toRemove.length;
+        setBadge(`trimmed ${toRemove.length}, kept ${CONFIG.keepLast}`);
+        logLine(`trimNow => removed ${toRemove.length}, kept ${CONFIG.keepLast}`);
+        writeStatus({ lastTrimmed: toRemove.length });
+
+        if (CONFIG.playAnimationOnTrim) {
+          playTheme(CONFIG.animationThemeId);
+        }
+
+        return toRemove.length;
+      }
+
+      function scheduleTrim() {
+        clearTimeout(trimTimer);
+        trimTimer = setTimeout(() => {
+          try {
+            trimNow();
+          } catch (err) {
+            setBadge('trim error');
+            logLine(`trim failed: ${err.message}`);
+          }
+        }, CONFIG.trimDebounceMs);
+      }
+
+      function startObserver() {
+        if (observer) observer.disconnect();
+
+        observer = new MutationObserver(() => {
+          scheduleTrim();
+        });
+
+        observer.observe(els.thread, {
+          childList: true,
+          subtree: true
+        });
+
+        setBadge(`watching, keep ${CONFIG.keepLast}`);
+        logLine('observer attached');
+        writeStatus();
+        scheduleTrim();
+        return true;
+      }
+
+      function stopObserver() {
+        if (observer) observer.disconnect();
+        observer = null;
+        setBadge('trim stopped');
+        logLine('observer stopped');
+        writeStatus();
+      }
+
+      function setKeepLast(n) {
+        const value = Number(n);
+        if (!Number.isFinite(value) || value < 1) {
+          throw new Error('keepLast must be a positive number');
+        }
+        CONFIG.keepLast = Math.floor(value);
+        els.keepLastInput.value = String(CONFIG.keepLast);
+        setBadge(`keep ${CONFIG.keepLast}`);
+        logLine(`keepLast set to ${CONFIG.keepLast}`);
+        writeStatus();
+        scheduleTrim();
+        return CONFIG.keepLast;
+      }
+
+      function getStatus() {
+        return {
+          keepLast: CONFIG.keepLast,
+          observerActive: !!observer,
+          totalTrimmedThisPage: lastTrimmedCount,
+          visibleTurns: getTurnArticles().length,
+          selectedTheme: CONFIG.animationThemeId,
+          playAnimationOnTrim: CONFIG.playAnimationOnTrim
+        };
+      }
+
+      function wireThemeSelector() {
+        if (!window.TrimAsciiThemes) {
+          els.themeDesc.textContent = 'Theme library not found.';
+          return;
+        }
+
+        const themes = window.TrimAsciiThemes.listThemes();
+        els.themeSelect.innerHTML = '';
+
+        themes.forEach((theme) => {
+          const opt = document.createElement('option');
+          opt.value = theme.id;
+          opt.textContent = `${theme.name} (${theme.frameCount}f @ ${theme.frameDelayMs}ms)`;
+          if (theme.id === CONFIG.animationThemeId) opt.selected = true;
+          els.themeSelect.appendChild(opt);
+        });
+
+        const refreshDescription = () => {
+          const selected = window.TrimAsciiThemes.getTheme(els.themeSelect.value);
+          if (!selected) return;
+          CONFIG.animationThemeId = selected.id;
+          els.themeDesc.textContent = selected.description;
+          writeStatus();
+        };
+
+        els.themeSelect.addEventListener('change', refreshDescription);
+        refreshDescription();
+      }
+
+      function wireControls() {
+        els.btnKeep.addEventListener('click', () => {
+          try {
+            setKeepLast(els.keepLastInput.value);
+          } catch (err) {
+            logLine(err.message);
+          }
+        });
+
+        els.btnTrim.addEventListener('click', () => {
+          trimNow();
+        });
+
+        els.btnStart.addEventListener('click', () => {
+          startObserver();
+        });
+
+        els.btnStop.addEventListener('click', () => {
+          stopObserver();
+        });
+
+        els.btnStatus.addEventListener('click', () => {
+          const status = getStatus();
+          writeStatus(status);
+          logLine(`status => ${JSON.stringify(status)}`);
+        });
+
+        els.btnAddOne.addEventListener('click', () => {
+          appendTurn();
+          logLine('added 1 turn');
+          writeStatus();
+        });
+
+        els.btnAddFive.addEventListener('click', () => {
+          for (let i = 0; i < 5; i += 1) appendTurn();
+          logLine('added 5 turns');
+          writeStatus();
+        });
+
+        els.btnReset.addEventListener('click', () => {
+          const count = Math.max(1, Number(els.seedCountInput.value) || 30);
+          seedTurns(count);
+          logLine(`thread reset with ${count} turns`);
+          writeStatus();
+          scheduleTrim();
+        });
+
+        els.btnPlayTheme.addEventListener('click', () => {
+          playTheme(CONFIG.animationThemeId);
+        });
+
+        els.btnPlayRandom.addEventListener('click', () => {
+          if (!window.TrimAsciiThemes) return;
+          const randomTheme = window.TrimAsciiThemes.getRandomTheme();
+          CONFIG.animationThemeId = randomTheme.id;
+          els.themeSelect.value = randomTheme.id;
+          els.themeDesc.textContent = randomTheme.description;
+          writeStatus();
+          playTheme(randomTheme.id);
+        });
+
+        els.playOnTrimCheckbox.addEventListener('change', () => {
+          CONFIG.playAnimationOnTrim = !!els.playOnTrimCheckbox.checked;
+          writeStatus();
+          logLine(`playAnimationOnTrim => ${CONFIG.playAnimationOnTrim}`);
+        });
+      }
+
+      // Expose userscript-compatible helpers.
+      window.trimChatNow = trimNow;
+      window.trimChatStop = stopObserver;
+      window.trimChatStart = startObserver;
+      window.trimChatSetKeepLast = setKeepLast;
+      window.trimChatStatus = getStatus;
+
+      seedTurns(30);
+      wireThemeSelector();
+      wireControls();
+      startObserver();
+      writeStatus({ boot: 'ready' });
+      logLine('runner ready');
+    })();
+  </script>
+</body>
+</html>
