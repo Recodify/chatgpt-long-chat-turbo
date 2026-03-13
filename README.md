@@ -12,12 +12,11 @@ This makes long technical sessions, deep analysis threads, and multi‑hour inve
 
 ## Features
 
-- Automatically hides older conversation turns
+- Improves long chat initial load time by observing the DOM creation and trimming during the initial load.
+- Automatically hides older conversation turns as you chat
 - Keeps the most recent turns visible
 - Reduces scroll distance in very long chats
-- Improves focus on the current reasoning
 - Runs automatically via Tampermonkey
-- Can optionally reveal hidden turns
 - Optional geeky ASCII trim animations in the console (theme selectable)
 
 This is purely a browser‑side UI helper. It does not modify the actual conversation stored by ChatGPT.
@@ -112,6 +111,20 @@ Typical behaviour:
 If the script version includes a toggle control, you can reveal hidden turns at any time.
 
 Hidden turns are not removed from the conversation. They are only hidden in the browser.
+
+---
+
+## Long Chat Load Tuning
+
+If your browser hangs while loading very large conversations, tune these top-level `CONFIG` values in `long-chat-turbo-monkey.js`:
+
+```javascript
+trimChunkSize: 48,                    // lower = less blocking, slower cleanup
+trimChunkDelayMs: 0,                  // increase to yield more between chunks
+suppressAnimationDuringInitialTrim: true
+```
+
+The script starts at `document-start` and performs chunked initial trimming to reduce first-load stalls.
 
 ---
 

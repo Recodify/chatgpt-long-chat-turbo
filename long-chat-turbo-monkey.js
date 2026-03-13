@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name         ChatGPT Auto Trim Old Turns
+// @name         Recodify - Long Chat Turbo
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      1.2
 // @description  Keeps only the most recent chat turns mounted in the DOM to reduce ChatGPT UI lag.
 // @match        https://chatgpt.com/*
 // @match        https://*.chatgpt.com/*
 // @grant        none
-// @run-at       document-idle
+// @run-at       document-start
 // ==/UserScript==
 
 (() => {
@@ -18,6 +18,11 @@
     showBadge: true,
     logToConsole: false,
     preservePinnedUI: true,    // tries to avoid touching non-turn articles
+    // remove old turns in chunks to avoid long main-thread blocks on huge chats
+    trimChunkSize: 48,
+    trimChunkDelayMs: 0,
+    // suppress animation during initial heavy trim so first load stays responsive
+    suppressAnimationDuringInitialTrim: true,
 
     // ASCII animation options:
     // - set to false to disable all animation output
@@ -33,13 +38,13 @@
   const TRIM_ANIMATION_THEMES = Object.freeze({
     'cyberpunk-terminal': Object.freeze({
       introBanner: Object.freeze([
-        '    ____      _                          _____             _     _____           _                  ____',
-        '   / / /     | |                        /  __ \\ |         | |   |_   _|         | |                / / /',
-        '  /_/_/_     | |     ___  _ __   __ _   | /  \\/ |__   __ _| |_    | |_   _ _ __ | |__   ___       /_/_/_',
-        '   / / /     | |    / _ \\| \'_ \\ / _` |  | |   | |_ \\ / _` | __|   | | | | | \'__ | \'_ \\ / _ \\       / / /',
-        '   /_/_/     | |___| (_) | | | | |_| |  | \\__/\\ | | | (_| | |_    | | |_| | |   | |_) | (_) |     /_/_/',
-        '    / /      \\_____/\\___/|_| |_|\\__  |   \\____/ | |_|\\__,_|\\__|   \\_/\\__,_|_|   |_.__/ \\___/       / /',
-        '   /_/                           _/ _/                                                            /_/'
+       "    ____      _                            _____               _     _____           _                  ____ ",
+       "   / / /     | |                          /  __ \ |           | |   |_   _|         | |                / / / ",
+       "  /_/_/_     | |     ___   _ __    __ _   | /  \/ |__    __ _ | |_    | |_   _ _ __ | |__   ___       /_/_/_ ",
+       "   / / /     | |    / _ \ | '_ \  / _` |  | |   | |_ \  / _`  | __|   | | | | | '__ | '_ \ / _ \       / / / ",
+       "   /_/_/     | |___| (_)  | | | |  |_| |  | \__/\ | | |  (_|  | |_    | | |_| | |   | |_) | (_) |     /_/_/  ",
+       "    / /      \_____/\___/ |_| |_| \__  |   \____/ | |_| \__,_ |\__|   \_/\__,_|_|   |_.__/ \___/       / /   ",
+       "   /_/                             _/ _/                                                              /_/    "
       ]),
       frames: Object.freeze([
         '[SYS] boot trim-core  [#.........] 09%',
@@ -161,10 +166,18 @@
   const DEFAULT_ANIMATION_THEME = 'cyberpunk-terminal';
 
   let observer = null;
+  let rootObserver = null;
+  let observedThread = null;
   let trimTimer = null;
+  let chunkTrimTimer = null;
   let lastTrimmedCount = 0;
   let animationTimer = null;
   let lastAnimationAt = 0;
+  let chunkTrimActive = false;
+  let chunkTrimRemovedTotal = 0;
+  let pendingTrimAfterChunk = false;
+  let initialTrimSettled = false;
+  let lastAutoTrimAt = null;
 
   function log(...args) {
     if (CONFIG.logToConsole) console.log('[chatgpt-trim]', ...args);
@@ -192,6 +205,7 @@
 
     let badge = document.getElementById('cgpt-trim-badge');
     if (badge) return badge;
+    if (!document.body) return null;
 
     badge = document.createElement('div');
     badge.id = 'cgpt-trim-badge';
@@ -255,6 +269,88 @@
     animationTimer = null;
   }
 
+  function stopChunkTrim() {
+    if (chunkTrimTimer) {
+      clearTimeout(chunkTrimTimer);
+      chunkTrimTimer = null;
+    }
+    chunkTrimActive = false;
+    chunkTrimRemovedTotal = 0;
+    pendingTrimAfterChunk = false;
+  }
+
+  function shouldSuppressAnimation() {
+    return CONFIG.suppressAnimationDuringInitialTrim && !initialTrimSettled;
+  }
+
+  function applyTrimBatch(thread, toRemove, placeholderCount) {
+    // Remove old placeholder(s) first so we keep only one fresh marker.
+    [...thread.querySelectorAll('[data-cgpt-trim-placeholder="1"]')].forEach((n) => n.remove());
+
+    const placeholder = makePlaceholder(placeholderCount);
+    const first = toRemove[0];
+    if (first && first.parentNode) {
+      first.parentNode.insertBefore(placeholder, first);
+    } else {
+      thread.prepend(placeholder);
+    }
+    toRemove.forEach((n) => n.remove());
+  }
+
+  function finalizeChunkTrim(visibleCount) {
+    const removed = chunkTrimRemovedTotal;
+    const shouldAnimate = removed > 0 && !shouldSuppressAnimation();
+
+    chunkTrimActive = false;
+    chunkTrimRemovedTotal = 0;
+    setBadge(`trim idle (${visibleCount})`);
+    if (shouldAnimate) {
+      playTrimAnimation(removed, visibleCount);
+    }
+    if (!initialTrimSettled) {
+      initialTrimSettled = true;
+    }
+
+    if (pendingTrimAfterChunk) {
+      pendingTrimAfterChunk = false;
+      scheduleTrim(0);
+    }
+  }
+
+  function runChunkTrimStep() {
+    const thread = getThread();
+    if (!thread) {
+      stopChunkTrim();
+      setBadge('no thread');
+      return;
+    }
+
+    const articles = getTurnArticles();
+    const excess = articles.length - CONFIG.keepLast;
+    if (excess <= 0) {
+      finalizeChunkTrim(articles.length);
+      return;
+    }
+
+    const removeCount = Math.min(excess, Math.max(1, Math.floor(CONFIG.trimChunkSize)));
+    const toRemove = articles.slice(0, removeCount);
+    chunkTrimRemovedTotal += toRemove.length;
+    lastTrimmedCount += toRemove.length;
+
+    applyTrimBatch(thread, toRemove, chunkTrimRemovedTotal);
+    setBadge(`trimming ${chunkTrimRemovedTotal}, keep ${CONFIG.keepLast}`);
+    log(`Chunk trimmed ${toRemove.length} (total ${chunkTrimRemovedTotal})`);
+
+    chunkTrimTimer = setTimeout(runChunkTrimStep, Math.max(0, Math.floor(CONFIG.trimChunkDelayMs)));
+  }
+
+  function startChunkTrim() {
+    if (chunkTrimActive) return;
+    chunkTrimActive = true;
+    chunkTrimRemovedTotal = 0;
+    runChunkTrimStep();
+  }
+
   function playTrimAnimation(trimmedCount, visibleCount) {
     if (!CONFIG.enableTrimAnimation) return;
 
@@ -294,6 +390,11 @@
   }
 
   function trimNow() {
+    if (chunkTrimActive) {
+      pendingTrimAfterChunk = true;
+      return 0;
+    }
+
     const thread = getThread();
     if (!thread) {
       setBadge('no thread');
@@ -305,70 +406,120 @@
 
     if (excess <= 0) {
       setBadge(`trim idle (${articles.length})`);
+      if (!initialTrimSettled) {
+        initialTrimSettled = true;
+      }
+      return 0;
+    }
+
+    const chunkSize = Math.max(1, Math.floor(CONFIG.trimChunkSize));
+    if (excess > chunkSize) {
+      startChunkTrim();
       return 0;
     }
 
     const toRemove = articles.slice(0, excess);
-
-    // Remove old placeholder(s) first so we keep only one fresh marker.
-    [...thread.querySelectorAll('[data-cgpt-trim-placeholder="1"]')].forEach((n) => n.remove());
-
-    const placeholder = makePlaceholder(toRemove.length);
-    const first = toRemove[0];
-    if (first && first.parentNode) {
-      first.parentNode.insertBefore(placeholder, first);
-    } else {
-      thread.prepend(placeholder);
-    }
-    toRemove.forEach((n) => n.remove());
+    applyTrimBatch(thread, toRemove, toRemove.length);
 
     lastTrimmedCount += toRemove.length;
     setBadge(`trimmed ${toRemove.length}, kept ${CONFIG.keepLast}`);
     log(`Trimmed ${toRemove.length}, kept ${CONFIG.keepLast}`);
 
     const visibleCount = Math.max(0, articles.length - toRemove.length);
-    playTrimAnimation(toRemove.length, visibleCount);
+    if (!shouldSuppressAnimation()) {
+      playTrimAnimation(toRemove.length, visibleCount);
+    }
+    if (!initialTrimSettled) {
+      initialTrimSettled = true;
+    }
 
     return toRemove.length;
   }
 
-  function scheduleTrim() {
+  function scheduleTrim(delayOverrideMs) {
+    if (chunkTrimActive) {
+      pendingTrimAfterChunk = true;
+      return;
+    }
+
     clearTimeout(trimTimer);
+    const delayMs = Number.isFinite(delayOverrideMs)
+      ? Math.max(0, Math.floor(delayOverrideMs))
+      : CONFIG.trimDebounceMs;
+
     trimTimer = setTimeout(() => {
       try {
+        lastAutoTrimAt = new Date().toISOString();
         trimNow();
       } catch (err) {
         console.error('[chatgpt-trim] trim failed:', err);
         setBadge('trim error');
       }
-    }, CONFIG.trimDebounceMs);
+    }, delayMs);
   }
 
   function startObserver() {
     const thread = getThread();
     if (!thread) {
+      observedThread = null;
       setBadge('waiting for thread');
       return false;
     }
 
-    if (observer) observer.disconnect();
+    if (observer && observedThread !== thread) {
+      observer.disconnect();
+      observer = null;
+    }
 
-    observer = new MutationObserver(() => {
-      scheduleTrim();
-    });
+    if (!observer) {
+      observer = new MutationObserver(() => {
+        scheduleTrim(initialTrimSettled ? CONFIG.trimDebounceMs : 30);
+      });
+    }
 
-    observer.observe(thread, {
+    observedThread = thread;
+
+    observer.observe(observedThread, {
       childList: true,
       subtree: true
     });
 
     setBadge(`watching, keep ${CONFIG.keepLast}`);
     log('Observer attached');
-    scheduleTrim();
+    scheduleTrim(0);
     return true;
   }
 
+  function startRootObserver() {
+    if (rootObserver) return;
+
+    const root = document.documentElement || document;
+    rootObserver = new MutationObserver(() => {
+      const currentThread = getThread();
+      if (currentThread && currentThread !== observedThread) {
+        log('Thread node changed, reattaching observer');
+        startObserver();
+      } else if (!currentThread && observedThread) {
+        // Route switched or thread was replaced; wait for next attach.
+        observedThread = null;
+      }
+    });
+
+    rootObserver.observe(root, {
+      childList: true,
+      subtree: true
+    });
+  }
+
+  function stopRootObserver() {
+    if (!rootObserver) return;
+    rootObserver.disconnect();
+    rootObserver = null;
+  }
+
   function waitForThreadAndStart() {
+    startRootObserver();
+
     if (startObserver()) return;
 
     const bootObserver = new MutationObserver(() => {
@@ -377,10 +528,27 @@
       }
     });
 
-    bootObserver.observe(document.documentElement, {
+    const bootRoot = document.documentElement || document;
+    bootObserver.observe(bootRoot, {
       childList: true,
       subtree: true
     });
+
+    // Race guard: if thread appeared between the first check and observe(),
+    // try once more immediately.
+    if (startObserver()) {
+      bootObserver.disconnect();
+      return;
+    }
+
+    // Ensure we retry once the initial DOM is parsed on very early startup.
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        if (startObserver()) {
+          bootObserver.disconnect();
+        }
+      }, { once: true });
+    }
   }
 
   // Expose a few helpers on window for manual control.
@@ -388,6 +556,9 @@
   window.trimChatStop = () => {
     if (observer) observer.disconnect();
     observer = null;
+    observedThread = null;
+    stopRootObserver();
+    stopChunkTrim();
     stopTrimAnimation();
     setBadge('trim stopped');
     log('Observer stopped');
@@ -424,7 +595,12 @@
   window.trimChatStatus = () => ({
     keepLast: CONFIG.keepLast,
     observerActive: !!observer,
+    rootObserverActive: !!rootObserver,
+    threadAttached: !!observedThread,
     totalTrimmedThisPage: lastTrimmedCount,
+    chunkTrimActive,
+    initialTrimSettled,
+    lastAutoTrimAt,
     animationEnabled: CONFIG.enableTrimAnimation,
     animationTheme: CONFIG.trimAnimationTheme,
     animationThemes: listAnimationThemes()
