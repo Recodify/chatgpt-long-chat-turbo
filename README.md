@@ -1,12 +1,14 @@
-# ChatGPT Article / Chat Turn Trimmer
+# Recodify - Long Chat Turbo
 
-A lightweight Tampermonkey userscript that trims long ChatGPT conversations in the browser by hiding older turns.
+We've all been there, the chat gets long and your patiences gets short. A trillion dollar UI slows a craw and your laptop fans starting screaming for more beer or they're done with you.
 
-When a chat gets very long, the UI becomes painful to scroll and harder to reason about. This script keeps the most recent messages visible and hides older ones, dramatically reducing scroll distance and visual clutter.
+Recodify - Long Chat Turbo to the rescue!
 
-Nothing is deleted. Messages are simply hidden in the DOM.
+Nothing is deleted on the server, it's all client side wit hmessages simply removed for the client side DOM.
 
 This makes long technical sessions, deep analysis threads, and multi‑hour investigations much easier to navigate.
+
+And yes.....OpenAi should be embarassed this is tool needs to exist.
 
 ---
 
@@ -23,7 +25,23 @@ This is purely a browser‑side UI helper. It does not modify the actual convers
 
 ---
 
+## A Demo - 175 turn chat with heavy code and canvas use
+
+### With Long Chat Turbo
+
+![faster](./img/faster.gif)
+
+> **16s** hardly amazingly but workable!
+
+### Without Long Chat Turbo
+
+![slower](./img/slower.gif)
+
+> **200s** I gave up at this point, ui was largely unresponsive for long periods and CPU was maxed.
+
 ## Why This Exists
+
+---
 
 Long LLM sessions frequently produce hundreds of turns.
 
@@ -45,7 +63,54 @@ This script solves that by trimming the visible portion of the chat.
 
 ---
 
-## Installation
+## How It Works
+
+The script scans the ChatGPT conversation container and identifies message turns.
+
+When the number of turns exceeds a threshold, older turns are hidden while the newest remain visible.
+
+This reduces:
+
+- Scroll distance
+- Browser rendering work
+- Cognitive clutter
+
+All changes are purely DOM manipulation inside your browser.
+
+---
+
+## Manual simple version
+
+## Simple Version
+
+Before the userscript version, a simpler method was used that did not require Tampermonkey. Instead, a small snippet was run manually in the browser console to hide older messages.
+
+### How it Works
+
+1. Open ChatGPT
+2. Open the browser developer console
+3. Paste the trimming snippet
+4. Execute it
+
+```javascript
+const turns = document.querySelectorAll('[data-message-author-role]');
+const keep = 12;
+
+turns.forEach((el, i) => {
+  if (i < turns.length - keep) {
+    el.style.display = "none";
+  }
+});
+```
+
+This hides all but the last `N` turns.
+
+### Limitations
+
+- You have to run it yourself
+- You will have to wait for your chat to load and will not benefit from the improved initial load of the automateed version.
+
+## Automated Version (RECOMMENDED)
 
 ### 1. Install Tampermonkey
 
@@ -58,21 +123,17 @@ Install the Tampermonkey browser extension. Supported browsers include:
 
 After installation, ensure Tampermonkey is enabled.
 
-### 2. Tampermonkey Permisions
-
-
-
-### 3. Install the userscript
+### 2. Install the userscript
 
 1. Open Tampermonkey
 2. Click **Create new script**
-3. Replace the default contents with the script from `tampermonkey/chat-turn-trimmer.user.js`
+3. Replace the default contents with the script from `long-chat-turbo-monkey.js`
 4. Save the script
 5. Refresh the ChatGPT page
 
 The script will now run automatically on ChatGPT pages.
 
-### 4. Enabling Userscripts in Chrome and Edge
+### 3. Enabling Userscripts in Chrome and Edge
 
 Tampermonkey version 5.3+ requires an extra one-time step before userscripts will run in Chrome or Edge. This is a browser-level requirement.
 
@@ -83,11 +144,7 @@ The official docs are here: [Q209: Permission to execute userscripts](https://ww
 Navigate to chrome://extensions (Chrome) or edge://extensions (Edge), click `Details` on tampermonkey:
 
 Then:
-
-
 ![guide](./img/guide.png)
-
-
 
 Find the Developer mode toggle in the top-right corner
 Enable it
@@ -176,55 +233,6 @@ This runner is fully independent of Tampermonkey and useful for smoke testing be
 
 ---
 
-## Simple Version (Original Approach)
-
-Before the userscript version, a simpler method was used that did not require Tampermonkey. Instead, a small snippet was run manually in the browser console to hide older messages.
-
-### How it worked
-
-1. Open ChatGPT
-2. Open the browser developer console
-3. Paste the trimming snippet
-4. Execute it
-
-```javascript
-const turns = document.querySelectorAll('[data-message-author-role]');
-const keep = 12;
-
-turns.forEach((el, i) => {
-  if (i < turns.length - keep) {
-    el.style.display = "none";
-  }
-});
-```
-
-This hides all but the last `N` turns.
-
-### Limitations
-
-- Must be run manually
-- Resets on page refresh
-- Less convenient for repeated use
-
-The Tampermonkey version automates this so trimming happens automatically whenever the page loads.
-
----
-
-## How It Works
-
-The script scans the ChatGPT conversation container and identifies message turns.
-
-When the number of turns exceeds a threshold, older turns are hidden while the newest remain visible.
-
-This reduces:
-
-- Scroll distance
-- Browser rendering work
-- Cognitive clutter
-
-All changes are purely DOM manipulation inside your browser.
-
----
 
 ## Limitations
 
