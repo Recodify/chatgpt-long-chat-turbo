@@ -259,6 +259,14 @@
     return TRIM_ANIMATION_THEMES[normalized] || TRIM_ANIMATION_THEMES[DEFAULT_ANIMATION_THEME];
   }
 
+  function formatAnimationElapsed(elapsedMs) {
+    return `t+${Math.max(0, Math.floor(elapsedMs))}ms`;
+  }
+
+  function formatTimedAnimationFrame(frame, startedAt) {
+    return `${frame}  ${formatAnimationElapsed(Date.now() - startedAt)}`;
+  }
+
   function listAnimationThemes() {
     return Object.keys(TRIM_ANIMATION_THEMES);
   }
@@ -369,6 +377,7 @@
 
     stopTrimAnimation();
     lastAnimationAt = now;
+    const animationStartedAt = now;
 
     console.log(`%c${theme.introBanner.join('\n')}`, theme.styles.intro);
 
@@ -378,13 +387,13 @@
         stopTrimAnimation();
         console.log(`%c${theme.completionBanner.join('\n')}`, theme.styles.completion);
         console.log(
-          `%c[trimmed:${trimmedCount}] [visible:${visibleCount}] [keep:${CONFIG.keepLast}]`,
+          `%c[trimmed:${trimmedCount}] [visible:${visibleCount}] [keep:${CONFIG.keepLast}] [elapsed:${Math.max(0, Date.now() - animationStartedAt)}ms]`,
           theme.styles.completion
         );
         return;
       }
 
-      console.log(`%c${frames[frameIndex]}`, theme.styles.frame);
+      console.log(`%c${formatTimedAnimationFrame(frames[frameIndex], animationStartedAt)}`, theme.styles.frame);
       frameIndex += 1;
     }, theme.frameDelayMs);
   }

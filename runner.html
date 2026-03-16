@@ -432,6 +432,14 @@
         }
       }
 
+      function formatAnimationElapsed(elapsedMs) {
+        return `t+${Math.max(0, Math.floor(elapsedMs))}ms`;
+      }
+
+      function formatTimedAnimationFrame(frame, startedAt) {
+        return `${frame}  ${formatAnimationElapsed(Date.now() - startedAt)}`;
+      }
+
       function playTheme(themeId) {
         if (!window.TrimAsciiThemes) {
           logLine('Theme library missing: window.TrimAsciiThemes not found.');
@@ -440,6 +448,7 @@
 
         const theme = window.TrimAsciiThemes.pickTheme(themeId);
         stopAnimationPlayback();
+        const animationStartedAt = Date.now();
 
         console.log(`%c${theme.introBanner.join('\n')}`, theme.styles.intro);
         logLine(`[theme:${theme.id}] START`);
@@ -450,11 +459,11 @@
             clearInterval(frameTimer);
             frameTimer = null;
             console.log(`%c${theme.completionBanner.join('\n')}`, theme.styles.completion);
-            logLine(`[theme:${theme.id}] COMPLETE`);
+            logLine(`[theme:${theme.id}] COMPLETE [elapsed:${Math.max(0, Date.now() - animationStartedAt)}ms]`);
             return;
           }
 
-          const frame = theme.frames[frameIndex];
+          const frame = formatTimedAnimationFrame(theme.frames[frameIndex], animationStartedAt);
           console.log(`%c${frame}`, theme.styles.frame);
           logLine(frame);
           frameIndex += 1;
