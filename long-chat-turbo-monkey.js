@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Recodify - Long Chat Turbo
 // @namespace    http://tampermonkey.net/
-// @version      1.2
+// @version      1.5
 // @description  Keeps only the most recent chat turns mounted in the DOM to reduce ChatGPT UI lag.
 // @match        https://chatgpt.com/*
 // @match        https://*.chatgpt.com/*
@@ -164,10 +164,12 @@
   });
 
   const DEFAULT_ANIMATION_THEME = 'cyberpunk-terminal';
+  const BOOT_POLL_MS = 120;
+  const THREAD_RECHECK_MS = 1000;
 
   let observer = null;
-  let rootObserver = null;
   let observedThread = null;
+  let bootstrapTimer = null;
   let trimTimer = null;
   let chunkTrimTimer = null;
   let lastTrimmedCount = 0;
@@ -198,6 +200,10 @@
     }
 
     return nodes;
+  }
+
+  function getTurnCount() {
+    return getTurnArticles().length;
   }
 
   function ensureBadge() {
@@ -275,6 +281,54 @@
     if (!animationTimer) return;
     clearInterval(animationTimer);
     animationTimer = null;
+  }
+
+  function stopBootstrapTimer() {
+    if (!bootstrapTimer) return;
+    clearTimeout(bootstrapTimer);
+    bootstrapTimer = null;
+  }
+
+  function scheduleBootstrapCheck(delayMs) {
+    stopBootstrapTimer();
+    bootstrapTimer = setTimeout(runBootstrapCheck, Math.max(0, Math.floor(delayMs)));
+  }
+
+  function runBootstrapCheck() {
+    bootstrapTimer = null;
+
+    const currentThread = getThread();
+    if (!currentThread) {
+      if (observer) {
+        observer.disconnect();
+        observer = null;
+      }
+      observedThread = null;
+      scheduleBootstrapCheck(BOOT_POLL_MS);
+      return;
+    }
+
+    if (currentThread !== observedThread) {
+      startObserver();
+    }
+
+    const articleCount = getTurnCount();
+
+    // Keep boot polling aggressive until we have seen real chat turns and
+    // either trimmed them or confirmed there is nothing to trim yet.
+    if (!initialTrimSettled) {
+      if (articleCount > CONFIG.keepLast && !trimTimer && !chunkTrimActive) {
+        scheduleTrim(0);
+      }
+      scheduleBootstrapCheck(BOOT_POLL_MS);
+      return;
+    }
+
+    if (articleCount > CONFIG.keepLast && !trimTimer && !chunkTrimActive) {
+      scheduleTrim(0);
+    }
+
+    scheduleBootstrapCheck(THREAD_RECHECK_MS);
   }
 
   function stopChunkTrim() {
@@ -411,6 +465,11 @@
     }
 
     const articles = getTurnArticles();
+    if (articles.length === 0) {
+      setBadge('waiting for turns');
+      return 0;
+    }
+
     const excess = articles.length - CONFIG.keepLast;
 
     if (excess <= 0) {
@@ -451,12 +510,20 @@
       return;
     }
 
-    clearTimeout(trimTimer);
     const delayMs = Number.isFinite(delayOverrideMs)
       ? Math.max(0, Math.floor(delayOverrideMs))
       : CONFIG.trimDebounceMs;
 
+    // During initial load, queue one trim and let it fire instead of
+    // endlessly postponing it while ChatGPT continues mutating the thread.
+    if (!initialTrimSettled && trimTimer) {
+      return;
+    }
+
+    clearTimeout(trimTimer);
+
     trimTimer = setTimeout(() => {
+      trimTimer = null;
       try {
         lastAutoTrimAt = new Date().toISOString();
         trimNow();
@@ -482,6 +549,14 @@
 
     if (!observer) {
       observer = new MutationObserver(() => {
+        if (observedThread && !observedThread.isConnected) {
+          observer.disconnect();
+          observer = null;
+          observedThread = null;
+          scheduleBootstrapCheck(0);
+          return;
+        }
+
         scheduleTrim(initialTrimSettled ? CONFIG.trimDebounceMs : 30);
       });
     }
@@ -499,65 +574,13 @@
     return true;
   }
 
-  function startRootObserver() {
-    if (rootObserver) return;
-
-    const root = document.documentElement || document;
-    rootObserver = new MutationObserver(() => {
-      const currentThread = getThread();
-      if (currentThread && currentThread !== observedThread) {
-        log('Thread node changed, reattaching observer');
-        startObserver();
-      } else if (!currentThread && observedThread) {
-        // Route switched or thread was replaced; wait for next attach.
-        observedThread = null;
-      }
-    });
-
-    rootObserver.observe(root, {
-      childList: true,
-      subtree: true
-    });
-  }
-
-  function stopRootObserver() {
-    if (!rootObserver) return;
-    rootObserver.disconnect();
-    rootObserver = null;
-  }
-
   function waitForThreadAndStart() {
-    startRootObserver();
-
-    if (startObserver()) return;
-
-    const bootObserver = new MutationObserver(() => {
-      if (startObserver()) {
-        bootObserver.disconnect();
-      }
-    });
-
-    const bootRoot = document.documentElement || document;
-    bootObserver.observe(bootRoot, {
-      childList: true,
-      subtree: true
-    });
-
-    // Race guard: if thread appeared between the first check and observe(),
-    // try once more immediately.
     if (startObserver()) {
-      bootObserver.disconnect();
+      scheduleBootstrapCheck(THREAD_RECHECK_MS);
       return;
     }
 
-    // Ensure we retry once the initial DOM is parsed on very early startup.
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => {
-        if (startObserver()) {
-          bootObserver.disconnect();
-        }
-      }, { once: true });
-    }
+    scheduleBootstrapCheck(BOOT_POLL_MS);
   }
 
   // Expose a few helpers on window for manual control.
@@ -566,7 +589,7 @@
     if (observer) observer.disconnect();
     observer = null;
     observedThread = null;
-    stopRootObserver();
+    stopBootstrapTimer();
     stopChunkTrim();
     stopTrimAnimation();
     setBadge('trim stopped');
@@ -604,8 +627,9 @@
   window.trimChatStatus = () => ({
     keepLast: CONFIG.keepLast,
     observerActive: !!observer,
-    rootObserverActive: !!rootObserver,
+    bootstrapTimerActive: !!bootstrapTimer,
     threadAttached: !!observedThread,
+    turnCount: getTurnCount(),
     totalTrimmedThisPage: lastTrimmedCount,
     chunkTrimActive,
     initialTrimSettled,
